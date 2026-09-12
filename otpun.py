@@ -45,8 +45,8 @@ logging.getLogger("aiohttp").setLevel(logging.CRITICAL)
 
 POLL_INTERVAL   = 4  
 PAGE_SIZE       = 20    
-TOKEN           = os.getenv("BOT_TOKEN", "8751858624:AAHAA2jMVScmhYECFtLVQ-q89ImsXh6mct8")
-BOT_USERNAME    = "fjjhfbot"
+TOKEN           = os.getenv("BOT_TOKEN", "8877437030:AAFGon2GuBerdgA2o5QGDBrc8BpBQOsIgr4")
+BOT_USERNAME    = "fatherbotfreesmsbot"
 
 # 🔥 OPTIMIZED FOR RAILWAY 500MB LIMIT
 CHUNK_SIZE      = 15    
